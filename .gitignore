@@ -1,0 +1,25 @@
+# Ignorar carpetas temporales de Visual Studio
+.vs/
+Debug/
+Release/
+x64/
+ipch/
+
+# Ignorar archivos de usuario y bases de datos locales
+*.user
+*.suo
+*.db
+*.opendb
+*.vc.db
+
+# Ignorar archivos de registro y otros temporales
+*.log
+*.tlog
+*.lastbuildstate
+*.unsuccessfulbuild
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib

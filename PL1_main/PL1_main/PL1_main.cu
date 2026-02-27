@@ -8,6 +8,8 @@
 #include <sstream>
 #include <cmath>
 
+__constant__ int d_umbral;
+
 void cargarDataset(std::string ruta,
     std::vector<float>& dep_delay,
     std::vector<float>& arr_delay,
@@ -18,7 +20,7 @@ void cargarDataset(std::string ruta,
 
 void cargarFase01(std::vector<float>& retrasos, int umbral);
 
-__global__ void fase01(float *d_retraso, int num_vuelos, int umbral) {
+__global__ void fase01(float *d_retraso, int num_vuelos) {
     bool signo = true;
     // Calculamos el ID global
     int posicion = (blockDim.x * blockIdx.x) + threadIdx.x;
@@ -35,14 +37,14 @@ __global__ void fase01(float *d_retraso, int num_vuelos, int umbral) {
     if (isnan(valor)) return;
 
     // Comprobamos si es positivo o negativo
-    if (umbral < 0) {
+    if (d_umbral < 0) {
         signo = false;
     }
     // Comprobacion del umbral pra positivos y negativos
-    if (valor >= umbral && signo) {
+    if (valor >= d_umbral && signo) {
         printf("Hilo #%d: Retraso detectado de %.0f minutos\n", posicion, valor);
     }
-    else if (valor <= umbral && !signo) {
+    else if (valor <= d_umbral && !signo) {
         printf("Hilo #%d: Adelanto detectado de %.0f minutos\n", posicion, valor);
     }
 }
@@ -233,8 +235,11 @@ void cargarFase01(std::vector<float>& retrasos, int umbral) {
     //Copiamos a la memoria de la GPU el vector entero de retrasos
     cudaMemcpy(d_retrasos, retrasos.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
 
+    //Ponemos la variable en memoria
+    cudaMemcpyToSymbol(d_umbral, &umbral, sizeof(int));
+
     //Llamamos a la función de la GPU para que procese todos los datos
-    fase01 <<< bloques, hilosPorBloque >>> (d_retrasos, num_vuelos, umbral);
+    fase01 <<< bloques, hilosPorBloque >>> (d_retrasos, num_vuelos);
 
     //Sincronizamos todos los hilos(para comprobar que todos han terminado)
     cudaDeviceSynchronize();

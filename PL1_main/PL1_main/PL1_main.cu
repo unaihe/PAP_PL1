@@ -8,7 +8,12 @@
 #include <sstream>
 #include <cmath>
 
+#define MAX_MATRICULA 16
+
 __constant__ int d_umbral;
+__constant__ int d_umbral_f02;
+__device__ int d_contador_f02;
+
 
 void cargarDataset(std::string ruta,
     std::vector<float>& dep_delay,
@@ -19,6 +24,8 @@ void cargarDataset(std::string ruta,
     std::vector<int>& dest_id);
 
 void cargarFase01(std::vector<float>& retrasos, int umbral);
+
+void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retrasos, int umbral);
 
 __global__ void fase01(float *d_retraso, int num_vuelos) {
     bool signo = true;
@@ -48,6 +55,43 @@ __global__ void fase01(float *d_retraso, int num_vuelos) {
         printf("Hilo #%d: Adelanto detectado de %.0f minutos\n", posicion, valor);
     }
 }
+
+__global__ void fase02(float *d_arr_ent, float *d_arr_sal, char *d_tail_ent, char *d_tail_sal, int num_vuelos) {
+    //creamos la variable signo que usaremos para comprobar si se trata de un adelanto o un retraso
+    bool signo;
+    //Y cumple para ver si es solucion o no
+    bool cumple = false;
+    //Calculamos la posicion del hilo y comprobamos que este dentro del vector
+    int pos = (blockDim.x*blockIdx.x)+threadIdx.x;
+    if (pos >= num_vuelos) {
+        return;
+    }
+    //Cogemos el retraso del hilo
+    float retraso = d_arr_ent[pos];
+    //Comprobamos si es retraso o adelantos
+    if (retraso >= 0) {
+        signo = true;
+    }
+    else {
+        signo = false;
+    }
+    if (d_umbral_f02 >= 0) {
+        if (retraso >= d_umbral_f02) cumple = true;
+    }
+    else {
+        if (retraso <= d_umbral_f02) cumple = true;
+    }
+    //Lo implementamos de la siguiente forma para no tener repetida dos veces la suma en el if y en if else
+    if (cumple) {
+        int mi_indice = atomicAdd(&d_contador_f02, 1);
+        d_arr_sal[mi_indice] = retraso;
+        for (int i = 0; i < MAX_MATRICULA; i++) {
+            d_tail_sal[mi_indice * MAX_MATRICULA + i] = d_tail_ent[pos * MAX_MATRICULA + i];
+        }
+    }
+
+}
+
 
 
 int main()
@@ -127,6 +171,33 @@ int main()
         }
         case '2': {
             // Retraso en aterrizajes 
+            //Variables para el umbral
+            int umbral_llegada;
+            std::string entrada_f2;
+
+            //Limpiamos el buffer por si acaso
+            std::cin.ignore(1000, '\n');
+
+            //Bucle de validación (Igual que en Fase 1)
+            while (true) {
+                std::cout << "\n--- FASE 02: Analisis de Llegadas ---" << std::endl;
+                std::cout << "Introduce el umbral (positivo para retraso, negativo para adelanto): ";
+
+                if (!std::getline(std::cin, entrada_f2)) continue;
+                if (entrada_f2.empty()) continue;
+
+                try {
+                    umbral_llegada = std::stoi(entrada_f2);
+                    break; // Si es un número válido, salimos del bucle
+                }
+                catch (...) {
+                    std::cout << "Error: Por favor, introduce un numero entero (ej: 1440 o -30)." << std::endl;
+                }
+            }
+            std::cout << "Ejecutando Fase 02 con umbral " << umbral_llegada << "..." << std::endl;
+
+            //Llamada a la función cargarFase02 (igual que con la fase1)
+            cargarFase02(h_tail_num, h_arr_delay, umbral_llegada);
             break;
         }
         case '3': {
@@ -213,10 +284,10 @@ void cargarDataset(std::string ruta,
     std::cout << "Carga finalizada con exito." << std::endl;
 }
 
-void cargarFase01(std::vector<float>& retrasos, int umbral) {
+void cargarFase01(std::vector<float>& retrasosSalida, int umbral) {
 
     //Calculamos el numero de vuelos del vector para poder guardar el espacio necesario en memoria
-    int num_vuelos = retrasos.size();
+    int num_vuelos = retrasosSalida.size();
     //Creamos una variable puntero donde se iniciará el vector en la GPU
     float* d_retrasos;
     
@@ -233,7 +304,7 @@ void cargarFase01(std::vector<float>& retrasos, int umbral) {
     //Guardamos la memoria necesaria en la gpu a través del tamaño del vector calculado con el .size
     cudaMalloc(&d_retrasos, num_vuelos * sizeof(float));
     //Copiamos a la memoria de la GPU el vector entero de retrasos
-    cudaMemcpy(d_retrasos, retrasos.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_retrasos, retrasosSalida.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
 
     //Ponemos la variable en memoria
     cudaMemcpyToSymbol(d_umbral, &umbral, sizeof(int));
@@ -245,6 +316,92 @@ void cargarFase01(std::vector<float>& retrasos, int umbral) {
     cudaDeviceSynchronize();
     //Liberamos la memoria de la GPU
     cudaFree(d_retrasos);
+
+    std::cout << "[GPU] Analisis finalizado." << std::endl;
+}
+
+void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retrasosLlegada, int umbral) {
+    int num_vuelos = h_tail_num.size();
+
+    //Buscamos la matrícula más larga (Se utilizará como dato para guardar memoria necesaria)
+    int max_long = 0;
+    for (const std::string& s : h_tail_num) {
+        if (s.length() > max_long) max_long = s.length();
+    }
+    //Cambiamos el vector de string a char, debido a que no existe string en la gpu
+    //Con el ,0 nos aseguramos de que si una mátricula no ocupa el tamaño maximo se rellena con 0s
+    std::vector<char> h_tail_num_c(num_vuelos * MAX_MATRICULA, 0);
+    //Utilizamos un bucle para iterar sobre cada una de las mátriculas y otro para iterar sobre cada letra de la matricula
+    for (int i = 0; i < num_vuelos; ++i) {
+        for (int j = 0; j < h_tail_num[i].length() && j < MAX_MATRICULA; ++j) {
+            h_tail_num_c[i * MAX_MATRICULA + j] = h_tail_num[i][j];
+        }
+    }
+    //Creamos los punteros que usaremos a la hora de reservar la memoria de entrada en la gpu
+    float* d_arr_delay_ent;
+    char* d_tail_num_ent;
+    //Y creamos los mismos para los vectores que devolveremos con los resultados
+    float* d_arr_delay_sal;
+    char* d_tail_num_sal;
+
+    //Guardamos la memoria necesaria en gpu para los vectores de matriculas y de llegadas
+    cudaMalloc(&d_arr_delay_ent,num_vuelos*sizeof(float));
+    cudaMalloc(&d_tail_num_ent, num_vuelos * MAX_MATRICULA * sizeof(char));
+    //También reservamos para los vectores con las soluciones (mismo tamaño por si el peor caso todos son solucion)
+    cudaMalloc(&d_arr_delay_sal, num_vuelos * sizeof(float));
+    cudaMalloc(&d_tail_num_sal, num_vuelos * MAX_MATRICULA * sizeof(char));
+    //Copiamos los datos a la gpu
+    cudaMemcpy(d_arr_delay_ent,retrasosLlegada.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_tail_num_ent, h_tail_num_c.data(), num_vuelos * MAX_MATRICULA * sizeof(char), cudaMemcpyHostToDevice);
+
+    //Buscamos el número de hilos que permite el ordenador, para que el programa pueda ser escalable
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int hilosPorBloque = prop.maxThreadsPerBlock;
+    //Calculamos el número de bloques que necesitamos con el máximo de hilos para abordar el vector completo
+    int bloques = (num_vuelos + hilosPorBloque - 1) / hilosPorBloque;
+
+    //Ponemos el contador de la GPU a cero (lo usaremos para que no haya condiciones de carrera)
+    int cero = 0;
+    cudaMemcpyToSymbol(d_contador_f02, &cero, sizeof(int));
+    //Pasamos el umbral que el usuario eligió 
+    cudaMemcpyToSymbol(d_umbral_f02, &umbral, sizeof(int));
+
+    //Llamamos a la función de la GPU para que procese todos los datos
+    fase02 <<< bloques, hilosPorBloque >>> (d_arr_delay_ent,d_arr_delay_sal,d_tail_num_ent,d_tail_num_sal,num_vuelos);
+    
+    //Sincronizamos todos los hilos(para comprobar que todos han terminado)
+    cudaDeviceSynchronize();
+
+    //Miramos el numero de soluciones que hay(longitud del array solucion) 
+    int vuelos_solucion;
+    cudaMemcpyFromSymbol(&vuelos_solucion, d_contador_f02, sizeof(int));
+
+    if (vuelos_solucion > 0) {
+        //Preparamos vectores en la CPU para recibir los datos
+        std::vector<float> h_tiempos_res(vuelos_solucion);
+        std::vector<char> h_mats_res(vuelos_solucion * MAX_MATRICULA);
+
+        //Copiamos los resultados de la salida de la GPU a nuestros vectores de la CPU
+        cudaMemcpy(h_tiempos_res.data(), d_arr_delay_sal, vuelos_solucion * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_mats_res.data(), d_tail_num_sal, vuelos_solucion * MAX_MATRICULA * sizeof(char), cudaMemcpyDeviceToHost);
+
+        //Mostramos los resultados por pantalla
+        std::cout << "Se han detectado " << vuelos_solucion << " vuelos:" << std::endl;
+        for (int i = 0; i < vuelos_solucion; i++) {
+            // Usamos el puntero a la posición i-ésima para que printf lo lea como string
+            printf("Vuelo [%d]: Matricula %s | Tiempo: %.0f min\n", i + 1, &h_mats_res[i * MAX_MATRICULA], h_tiempos_res[i]);
+        }
+    }
+    else {
+        std::cout << "No se han encontrado vuelos que cumplan el umbral." << std::endl;
+    }
+
+    //Liberamos la memoria de la GPU
+    cudaFree(d_arr_delay_ent);
+    cudaFree(d_arr_delay_sal);
+    cudaFree(d_tail_num_ent);
+    cudaFree(d_tail_num_sal);
 
     std::cout << "[GPU] Analisis finalizado." << std::endl;
 }

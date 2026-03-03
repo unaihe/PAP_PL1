@@ -148,6 +148,43 @@ __global__ void fase03_basica(float* d_datos, int* d_resultado, int num_vuelos, 
     }
     __syncthreads();
     //Continuar con logica del vecino de izquierda y derecha
+    if (pos < num_vuelos) {
+        int mi_valor = sh_datos[posicion_hilo];
+        //Variable que usaremos para saber si es posible que sea max o min o deshechamos
+        bool sigo_siendo_candidato = true;
+
+        //Mirar a la izquierda
+        if (posicion_hilo > 0) {
+            int vecino_izq = sh_datos[posicion_hilo - 1];
+            if (operacion == OP_MAX) {
+                if (vecino_izq > mi_valor) sigo_siendo_candidato = false;
+            }
+            else {
+                if (vecino_izq < mi_valor) sigo_siendo_candidato = false;
+            }
+        }
+
+        //Mirar a la derecha (solo si aún no me han descartado)
+        if (sigo_siendo_candidato && posicion_hilo < blockDim.x - 1) {
+            int vecino_der = sh_datos[posicion_hilo + 1];
+            if (operacion == OP_MAX) {
+                if (vecino_der > mi_valor) sigo_siendo_candidato = false;
+            }
+            else {
+                if (vecino_der < mi_valor) sigo_siendo_candidato = false;
+            }
+        }
+
+        //El que no ha sido descartado por sus vecinos hace el atomic
+        if (sigo_siendo_candidato) {
+            if (operacion == OP_MAX) {
+                atomicMax(d_resultado, mi_valor);
+            }
+            else {
+                atomicMin(d_resultado, mi_valor);
+            }
+        }
+    }
 }
 
 
@@ -548,4 +585,16 @@ void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int varia
             // fase03_patron<<<...>>>(...);
             break;
         }
+    //Esperamos a todos los hilos
+    cudaDeviceSynchronize();
+    //Copiamos del resultado de la GPU a CPU
+    cudaMemcpy(&h_resultado, d_resultado, sizeof(int), cudaMemcpyDeviceToHost);
+    std::string nombre_op = (operacion_elegida == OP_MAX) ? "MAXIMO" : "MINIMO";
+    std::cout << "\n[GPU] El valor " << nombre_op << " encontrado es: " << h_resultado << " minutos." << std::endl;
+
+    //Liberamos la memoria
+    cudaFree(d_datos);
+    cudaFree(d_resultado);
+
+    std::cout << "[GPU] Fase 03 finalizada y memoria liberada." << std::endl;
 }

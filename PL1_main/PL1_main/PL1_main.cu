@@ -7,8 +7,22 @@
 #include <fstream>
 #include <sstream>
 #include <cmath>
-
+//fase2
 #define MAX_MATRICULA 16
+//fase3 (definimos las opciones para no tener que comparar strings)
+// Columnas
+#define COL_DEP 0
+#define COL_ARR 1
+#define COL_WEATHER 2
+// Operaciones
+#define OP_MAX 0
+#define OP_MIN 1
+// Variantes del ejercicio
+#define VAR_SIMPLE 1
+#define VAR_BASICA 2
+#define VAR_INTERMEDIA 3
+#define VAR_PATRON 4
+
 
 __constant__ int d_umbral;
 __constant__ int d_umbral_f02;
@@ -26,6 +40,8 @@ void cargarDataset(std::string ruta,
 void cargarFase01(std::vector<float>& retrasos, int umbral);
 
 void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retrasos, int umbral);
+
+void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int variante_elegida);
 
 __global__ void fase01(float *d_retraso, int num_vuelos) {
     bool signo = true;
@@ -92,6 +108,47 @@ __global__ void fase02(float *d_arr_ent, float *d_arr_sal, char *d_tail_ent, cha
 
 }
 
+__global__ void fase03_simple(float *d_datos, int *d_resultado, int num_vuelos, int operacion) {
+    //Calculamos la posicion del hilo y comprobamos que este dentro del vector
+    int pos = (blockDim.x * blockIdx.x) + threadIdx.x;
+    if (pos < num_vuelos) {
+        float dato = d_datos[pos];
+        if (isnan(dato)) return;
+
+        // Truncado a int 
+        int valor = (int)dato;
+
+        if (operacion == OP_MAX) {
+            atomicMax(d_resultado, valor);
+        }
+        else {
+            atomicMin(d_resultado, valor);
+        }
+    }
+}
+
+__global__ void fase03_basica(float* d_datos, int* d_resultado, int num_vuelos, int operacion) {
+    //Memoria compartida
+    extern __shared__ int sh_datos[];
+    //La usaremos para la memoria compartida
+    int posicion_hilo = threadIdx.x;
+    //Posicion en el vector completo
+    int pos = (blockDim.x * blockIdx.x) + threadIdx.x;
+    //Comprobamos que la posición es valida
+    if (pos >= num_vuelos) {
+        sh_datos[posicion_hilo] = (operacion == OP_MAX) ? -999999 : 999999;
+    }
+    float dato = d_datos[pos];
+    // Si el dato es NaN, ponemos un valor neutro para no estropear el max/min
+    if (isnan(dato)) {
+        sh_datos[posicion_hilo] = (operacion == OP_MAX) ? -999999 : 999999;
+    }
+    else {
+        sh_datos[posicion_hilo] = (int)dato; // Truncamos el dato
+    }
+    __syncthreads();
+    //Continuar con logica del vecino de izquierda y derecha
+}
 
 
 int main()
@@ -201,7 +258,46 @@ int main()
             break;
         }
         case '3': {
-            // Reducción (Máximos/Mínimos) 
+            //Máximos/Mínimos 
+            int col_sel, op_sel, var_sel;
+
+            std::cout << "\n--- FASE 03: Reduccion de Retraso ---" << std::endl;
+
+            //Selección de Columna
+            std::cout << "Seleccione columna (" << COL_DEP << ":DEP, " << COL_ARR << ":ARR, " << COL_WEATHER << ":WEA): ";
+            if (!(std::cin >> col_sel) || col_sel < 0 || col_sel > 2) {
+                std::cout << "Error: Seleccion de columna no valida." << std::endl;
+                std::cin.clear(); std::cin.ignore(1000, '\n');
+                break;
+            }
+
+            //Selección de Operación
+            std::cout << "Seleccione operacion (" << OP_MAX << ":Max, " << OP_MIN << ":Min): ";
+            if (!(std::cin >> op_sel) || (op_sel != OP_MAX && op_sel != OP_MIN)) {
+                std::cout << "Error: Operacion no valida." << std::endl;
+                std::cin.clear(); std::cin.ignore(1000, '\n');
+                break;
+            }
+
+            //Selección de Variante
+            std::cout << "Seleccione variante (1:Simple, 2:Basica, 3:Intermedia, 4:Patron): ";
+            if (!(std::cin >> var_sel) || var_sel < 1 || var_sel > 4) {
+                std::cout << "Error: Variante no valida." << std::endl;
+                std::cin.clear(); std::cin.ignore(1000, '\n');
+                break;
+            }
+
+            //Pasamos el vector correcto según la elección
+            if (col_sel == COL_DEP) {
+                cargarFase03(h_dep_delay, op_sel, var_sel);
+            }
+            else if (col_sel == COL_ARR) {
+                cargarFase03(h_arr_delay, op_sel, var_sel);
+            }
+            else if (col_sel == COL_WEATHER) {
+                cargarFase03(h_weather_delay, op_sel, var_sel);
+            }
+
             break;
         }
         case '4': {
@@ -404,4 +500,52 @@ void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retr
     cudaFree(d_tail_num_sal);
 
     std::cout << "[GPU] Analisis finalizado." << std::endl;
+}
+
+void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int variante_elegida) {
+    //Calculamos el tamaño del vector de entrada
+    int num_vuelos = retrasos.size();
+    //Creamos los punteros que usaremos para guardar memoria en la gpu
+    float* d_datos;
+    int* d_resultado;
+    //Variable donde pasaremos el resultado de la gpu
+    int h_resultado;
+
+    //Guardamos el espacio necesario para el vector y para la variable resultado en GPU
+    cudaMalloc(&d_datos, num_vuelos * sizeof(float));
+    cudaMalloc(&d_resultado, sizeof(int));
+    //Copiamos los datos del vector de entrada
+    cudaMemcpy(d_datos, retrasos.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
+    //Inicializamos el valor inicial de la variable resultado
+    //Si es un minimo pondremos un numero grande si es un maximo un numero pequeño
+    int valor_inicial = (operacion_elegida == OP_MAX) ? -999999 : 999999;
+    //Lo copiamos a la variable de la GPU
+    cudaMemcpy(d_resultado, &valor_inicial, sizeof(int), cudaMemcpyHostToDevice);
+    //Volvemos a calcular hilos por bloquye etc. Igual que en las otras fases(Hacer funcion)
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int threadsPerBlock = prop.maxThreadsPerBlock;
+    int blocks = (num_vuelos + threadsPerBlock - 1) / threadsPerBlock;
+
+    switch (variante_elegida) {
+        case VAR_SIMPLE:
+            fase03_simple <<< blocks, threadsPerBlock >>> (d_datos, d_resultado, num_vuelos, operacion_elegida);
+            break;
+
+        case VAR_BASICA:
+            int bytesCompartida = threadsPerBlock * sizeof(int);
+
+            //Ponemos de tercer parámetro la cantidad de memoria compartida que necesitamos en cada bloque en los <<< >>>
+            fase03_basica <<< blocks, threadsPerBlock, bytesCompartida >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
+            
+            break;
+
+        case VAR_INTERMEDIA:
+            // fase03_intermedia<<<...>>>(...);
+            break;
+
+        case VAR_PATRON:
+            // fase03_patron<<<...>>>(...);
+            break;
+        }
 }

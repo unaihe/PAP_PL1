@@ -138,13 +138,15 @@ __global__ void fase03_basica(float* d_datos, int* d_resultado, int num_vuelos, 
     if (pos >= num_vuelos) {
         sh_datos[posicion_hilo] = (operacion == OP_MAX) ? -999999 : 999999;
     }
-    float dato = d_datos[pos];
-    // Si el dato es NaN, ponemos un valor neutro para no estropear el max/min
-    if (isnan(dato)) {
-        sh_datos[posicion_hilo] = (operacion == OP_MAX) ? -999999 : 999999;
-    }
     else {
-        sh_datos[posicion_hilo] = (int)dato; // Truncamos el dato
+        float dato = d_datos[pos];
+        // Si el dato es NaN, ponemos un valor neutro para no estropear el max/min
+        if (isnan(dato)) {
+            sh_datos[posicion_hilo] = (operacion == OP_MAX) ? -999999 : 999999;
+        }
+        else {
+            sh_datos[posicion_hilo] = (int)dato; // Truncamos el dato
+        }
     }
     __syncthreads();
     //Continuar con logica del vecino de izquierda y derecha
@@ -183,6 +185,85 @@ __global__ void fase03_basica(float* d_datos, int* d_resultado, int num_vuelos, 
             else {
                 atomicMin(d_resultado, mi_valor);
             }
+        }
+    }
+}
+
+__global__ void fase03_intermedia(float* d_datos, int* d_resultado, int num_vuelos, int operacion) {
+    //Memoria compartida
+    extern __shared__ int sh_datos[];
+    //La usaremos para la memoria compartida
+    int posicion_hilo = threadIdx.x;
+    //Posicion en el vector completo
+    int pos = (blockDim.x * blockIdx.x) + threadIdx.x;
+
+    //Cargamos los datos a la memoria compartida, los que estan dentro y fuera porque tambien se haran comprobaciones en el ultimo valor
+    if (pos < num_vuelos) {
+        float val = d_datos[pos];
+        sh_datos[posicion_hilo] = isnan(val) ? ((operacion == OP_MAX) ? -999999 : 999999) : (int)val;
+    }
+    else {
+        sh_datos[posicion_hilo] = (operacion == OP_MAX) ? -999999 : 999999;
+    }
+
+    //Esperamos a que todos los hilos carguen sus datos
+    __syncthreads();
+
+    //Solo cogemos uno de cada dos hilos para hacer los calculos de quien es mayor o menor
+    // Añadimos: && posicion_hilo + 1 < blockDim.x para no leer fuera del array
+    if (posicion_hilo % 2 == 0 && (posicion_hilo + 1) < blockDim.x) {
+        int mi_val = sh_datos[posicion_hilo];
+        int vecino = sh_datos[posicion_hilo + 1];
+
+        if (operacion == OP_MAX) {
+            int ganador = (mi_val > vecino) ? mi_val : vecino;
+            atomicMax(d_resultado, ganador);
+        }
+        else { // Si no es max es min
+            int ganador = (mi_val < vecino) ? mi_val : vecino;
+            atomicMin(d_resultado, ganador);
+        }
+    }
+}
+__global__ void fase03_patron(float* d_datos, int* d_resultado, int num_vuelos, int operacion) {
+    //Memoria compartida
+    extern __shared__ int sh_datos[];
+    //La usaremos para la memoria compartida
+    int posicion_hilo = threadIdx.x;
+    //Posicion en el vector completo
+    int pos = (blockDim.x * blockIdx.x) + threadIdx.x;
+    //Cargamos los datos a la memoria compartida, los que estan dentro y fuera porque tambien se haran comprobaciones en el ultimo valor
+    if (pos < num_vuelos) {
+        float val = d_datos[pos];
+        sh_datos[posicion_hilo] = isnan(val) ? ((operacion == OP_MAX) ? -999999 : 999999) : (int)val;
+    }
+    else {
+        sh_datos[posicion_hilo] = (operacion == OP_MAX) ? -999999 : 999999;
+    }
+    //Esperamos a que todos los hilos carguen sus datos
+    __syncthreads();
+    
+    //Creamos el primer salto es decir la mitad del bloque y se irá dividiendo entre dos en cada paso
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (posicion_hilo < s) {
+            int mi_val = sh_datos[posicion_hilo];
+            int mi_val_salto = sh_datos[posicion_hilo+s];
+            if (mi_val < mi_val_salto && operacion == OP_MAX) {
+                sh_datos[posicion_hilo] = mi_val_salto;
+            }
+            else if (mi_val > mi_val_salto && operacion == OP_MIN) {
+                sh_datos[posicion_hilo] = mi_val_salto;
+            }
+        }
+        //Esperamos a que todos los hilos hagan el max o min entre ellos y seguimos a la siguiente iteracion
+        __syncthreads();
+    }
+    if (posicion_hilo == 0) {
+        if (operacion == OP_MAX) {
+            atomicMax(d_resultado, sh_datos[0]);
+        }
+        else {
+            atomicMin(d_resultado, sh_datos[0]);
         }
     }
 }
@@ -563,26 +644,26 @@ void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int varia
     cudaGetDeviceProperties(&prop, 0);
     int threadsPerBlock = prop.maxThreadsPerBlock;
     int blocks = (num_vuelos + threadsPerBlock - 1) / threadsPerBlock;
-
+    //Calculamos los bytes necesarios para la memoria compartida de los bloques (se usa en parte2,3,4)
+    int bytesCompartida = threadsPerBlock * sizeof(int);
     switch (variante_elegida) {
         case VAR_SIMPLE:
             fase03_simple <<< blocks, threadsPerBlock >>> (d_datos, d_resultado, num_vuelos, operacion_elegida);
             break;
 
         case VAR_BASICA:
-            int bytesCompartida = threadsPerBlock * sizeof(int);
-
             //Ponemos de tercer parámetro la cantidad de memoria compartida que necesitamos en cada bloque en los <<< >>>
-            fase03_basica <<< blocks, threadsPerBlock, bytesCompartida >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
+            fase03_basica <<< blocks, threadsPerBlock, bytesCompartida >>> (d_datos, d_resultado, num_vuelos, operacion_elegida);
             
             break;
 
         case VAR_INTERMEDIA:
-            // fase03_intermedia<<<...>>>(...);
+            //Seguimos trayendonos todos los datos a memoria compartida pero solo un hilo manda el max o min
+            fase03_intermedia <<< blocks, threadsPerBlock, bytesCompartida >>>(d_datos, d_resultado, num_vuelos, operacion_elegida);
             break;
 
         case VAR_PATRON:
-            // fase03_patron<<<...>>>(...);
+            fase03_patron <<< blocks, threadsPerBlock, bytesCompartida >>>(d_datos, d_resultado, num_vuelos, operacion_elegida);
             break;
         }
     //Esperamos a todos los hilos

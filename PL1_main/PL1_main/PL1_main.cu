@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <cmath>
+#include <unordered_map>
 //fase2
 #define MAX_MATRICULA 16
 //fase3 (definimos las opciones para no tener que comparar strings)
@@ -22,12 +23,13 @@
 #define VAR_BASICA 2
 #define VAR_INTERMEDIA 3
 #define VAR_PATRON 4
-
+// fase4 (Mas o menos el numero de ids que hay en el aeropuerto)
+#define TIPO_ORIGEN 0
+#define TIPO_DESTINO 1
 
 __constant__ int d_umbral;
 __constant__ int d_umbral_f02;
 __device__ int d_contador_f02;
-
 
 void cargarDataset(std::string ruta,
     std::vector<float>& dep_delay,
@@ -35,13 +37,16 @@ void cargarDataset(std::string ruta,
     std::vector<std::string>& tail_num, 
     std::vector<float>& weather_delay,
     std::vector<int>& origin_id,
-    std::vector<int>& dest_id);
+    std::vector<int>& dest_id,
+    std::unordered_map<int, std::string>& mapa_aeropuertos);
 
 void cargarFase01(std::vector<float>& retrasos, int umbral);
 
 void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retrasos, int umbral);
 
 void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int variante_elegida);
+
+void cargarFase04(std::vector<int>& vectorElegido, int umbral_hist, std::unordered_map<int, std::string>& mapa);
 
 __global__ void fase01(float *d_retraso, int num_vuelos) {
     bool signo = true;
@@ -225,6 +230,7 @@ __global__ void fase03_intermedia(float* d_datos, int* d_resultado, int num_vuel
         }
     }
 }
+
 __global__ void fase03_patron(float* d_datos, int* d_resultado, int num_vuelos, int operacion) {
     //Memoria compartida
     extern __shared__ int sh_datos[];
@@ -268,6 +274,20 @@ __global__ void fase03_patron(float* d_datos, int* d_resultado, int num_vuelos, 
     }
 }
 
+__global__ void fase04(int* d_ids, int* d_histograma, int num_vuelos, int tam_max) {
+    // Calculamos la posición global del hilo
+    int pos = (blockDim.x * blockIdx.x) + threadIdx.x;
+
+    // Si el hilo está dentro del rango de vuelos
+    if (pos < num_vuelos) {
+        int id = d_ids[pos];
+        // Solo sumamos si el ID es válido y cabe en nuestro array
+        if (id >= 0 && id < tam_max) {
+            // atomicAdd evita que dos hilos sobrescriban el mismo valor a la vez
+            atomicAdd(&d_histograma[id], 1);
+        }
+    }
+}
 
 int main()
 {
@@ -281,6 +301,7 @@ int main()
     std::vector<float> h_weather_delay;  
     std::vector<int> h_origin_id;        
     std::vector<int> h_dest_id;
+    std::unordered_map<int, std::string> mapa_aeropuertos;
 
     //Ruta al csv con los datos
     std::string ruta_csv;
@@ -294,7 +315,7 @@ int main()
 
     //Leer el CSV de datos
     std::cout << "Inicio de lectura de datos" << std::endl;
-    cargarDataset(ruta_csv, h_dep_delay, h_arr_delay, h_tail_num, h_weather_delay, h_origin_id, h_dest_id);
+    cargarDataset(ruta_csv, h_dep_delay, h_arr_delay, h_tail_num, h_weather_delay, h_origin_id, h_dest_id, mapa_aeropuertos);
 
     char opcion;
     do {
@@ -420,6 +441,36 @@ int main()
         }
         case '4': {
             // Histograma 
+            int tipo_sel; // 0 para Origen, 1 para Destino
+            int umbral_hist;
+
+            std::cout << "\n--- FASE 04: Histograma de Aeropuertos ---" << std::endl;
+
+            //Pedimos el tipo
+            std::cout << "Seleccione tipo de aeropuerto (0: ORIGEN, 1: DESTINO): ";
+            while (!(std::cin >> tipo_sel) || (tipo_sel != 0 && tipo_sel != 1)) {
+                std::cout << "Error: Seleccione 0 o 1: ";
+                std::cin.clear();
+                std::cin.ignore(1000, '\n');
+            }
+
+            //Pedimos el umbral
+            std::cout << "Introduce el umbral minimo de ocurrencias para mostrar: ";
+            while (!(std::cin >> umbral_hist) || umbral_hist < 0) {
+                std::cout << "Error: Introduzca un numero positivo: ";
+                std::cin.clear();
+                std::cin.ignore(1000, '\n');
+            }
+
+            //Llamamos a la función cargadora pasando el vector correspondiente
+            if (tipo_sel == 0) {
+                std::cout << "Generando histograma de salidas (ORIGIN)..." << std::endl;
+                cargarFase04(h_origin_id, umbral_hist, mapa_aeropuertos);
+            }
+            else {
+                std::cout << "Generando histograma de llegadas (DEST)..." << std::endl;
+                cargarFase04(h_dest_id, umbral_hist, mapa_aeropuertos);
+            }
             break;
         }
         case 'x':
@@ -440,7 +491,9 @@ void cargarDataset(std::string ruta,
     std::vector<std::string>& tail_num,
     std::vector<float>& weather_delay,
     std::vector<int>& origin_id,
-    std::vector<int>& dest_id) {
+    std::vector<int>& dest_id,
+    std::unordered_map<int, 
+    std::string>& mapa_aeropuertos) {
 
     std::ifstream archivo(ruta);
     if (!archivo.is_open()) {
@@ -455,6 +508,8 @@ void cargarDataset(std::string ruta,
     // Traza de ejecución requerida 
     std::cout << "Procesando lineas del dataset" << std::endl;
 
+    std::string nombre_origen_temp, nombre_destino_temp;
+
     while (std::getline(archivo, linea)) {
         std::stringstream ss(linea);
         std::string celda;
@@ -465,15 +520,31 @@ void cargarDataset(std::string ruta,
             if (columna == 3) {
                 tail_num.push_back(celda);
             }
+            //Columna 4: Código Origen (ej: "ATL")
+            else if (columna == 4) {
+                nombre_origen_temp = celda;
+            }
             // Columna 5: ID Aeropuerto Origen (ORIGIN_SEQ_ID) para Fase 04 
             else if (columna == 5) {
                 if (celda.empty()) origin_id.push_back(0);
-                else origin_id.push_back(std::stoi(celda));
+                else {
+                    int id = std::stoi(celda);
+                    origin_id.push_back(id);
+                    mapa_aeropuertos[id] = nombre_origen_temp;
+                }
+            }
+            //Columna 6: Código Destino (ej: "LAX")
+            else if (columna == 6) {
+                nombre_destino_temp = celda;
             }
             // Columna 7: ID Aeropuerto Destino (DEST_SEQ_ID) para Fase 04 
             else if (columna == 7) {
                 if (celda.empty()) dest_id.push_back(0);
-                else dest_id.push_back(std::stoi(celda));
+                else {
+                    int id = std::stoi(celda);
+                    dest_id.push_back(id);
+                    mapa_aeropuertos[id] = nombre_destino_temp;
+                }
             }
             // Columna 10: Retraso Salida (DEP_DELAY) para Fase 01 
             else if (columna == 10) {
@@ -494,7 +565,7 @@ void cargarDataset(std::string ruta,
         }
     }
     archivo.close();
-    // Traza final requerida [cite: 29]
+    // Traza final requerida 
     std::cout << "Carga finalizada con exito." << std::endl;
 }
 
@@ -678,4 +749,63 @@ void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int varia
     cudaFree(d_resultado);
 
     std::cout << "[GPU] Fase 03 finalizada y memoria liberada." << std::endl;
+}
+
+void cargarFase04(std::vector<int>& vectorElegido, int umbral_hist, std::unordered_map<int, std::string>& mapa) {
+    //Calculamos el numero de vuelos total en el vector
+    int num_vuelos = vectorElegido.size();
+    if (num_vuelos == 0) return;
+    //Calculamos el id maximo entre todos los vuelos para saber cuanta memoria reservar
+    int max_id = 0;
+    for (int id : vectorElegido) {
+        if (id > max_id) max_id = id;
+    }
+    int tam_histograma = max_id + 1;
+    //Creamos los punteros para reservar el espacio
+    int* d_ids;
+    int* d_histograma;
+    //Reservamos el espacio
+    cudaMalloc(&d_ids, num_vuelos * sizeof(int));
+    cudaMalloc(&d_histograma, tam_histograma * sizeof(int));
+    //Inicializamos el histograma a 0 para eliminar valores basura
+    cudaMemset(d_histograma, 0, tam_histograma * sizeof(int));
+    //Copiamos los datos del vecrtor elegido por el usario a la gpu
+    cudaMemcpy(d_ids, vectorElegido.data(), num_vuelos * sizeof(int), cudaMemcpyHostToDevice);
+    //Calculamos de nuevo el tamaño de bloques y los hilos por bloque
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int threadsPerBlock = prop.maxThreadsPerBlock;
+    int blocks = (num_vuelos + threadsPerBlock - 1) / threadsPerBlock;
+    //Ejecutamos la funcion de la fase4
+    std::cout << "[GPU] Generando histograma con " << tam_histograma << " posibles aeropuertos..." << std::endl;
+    fase04 <<< blocks, threadsPerBlock >>> (d_ids, d_histograma, num_vuelos, tam_histograma);
+    //Esperamos a todos los hilos
+    cudaDeviceSynchronize();
+    //Copiamos los resultados
+    std::vector<int> h_histograma(tam_histograma);
+    cudaMemcpy(h_histograma.data(), d_histograma, tam_histograma * sizeof(int), cudaMemcpyDeviceToHost);
+    //Mostramos los resultados
+    std::cout << "\n--- RESULTADOS DEL HISTOGRAMA (Umbral: " << umbral_hist << ") ---" << std::endl;
+    int unicos = 0;
+    for (int i = 0; i < tam_histograma; i++) {
+        if (h_histograma[i] >= umbral_hist) {
+            unicos++;
+            // Buscamos el nombre en el mapa, si no está ponemos el ID
+            std::string nombre = (mapa.count(i)) ? mapa[i] : "ID:" + std::to_string(i);
+
+            // Visualización visual (una barra por cada 1000 ocurrencias, por ejemplo)
+            printf("%-6s [%-7d]: ", nombre.c_str(), h_histograma[i]);
+
+            int num_barras = h_histograma[i] / 2000; // Ajusta este divisor según el tamaño de tu dataset
+            for (int b = 0; b < num_barras && b < 40; b++) std::cout << "I";
+            std::cout << std::endl;
+        }
+    }
+
+    std::cout << "--------------------------------------------------------" << std::endl;
+    std::cout << "Aeropuertos unicos que superan el umbral: " << unicos << std::endl;
+
+    //Limpieza
+    cudaFree(d_ids);
+    cudaFree(d_histograma);
 }

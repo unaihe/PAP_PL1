@@ -508,7 +508,7 @@ void cargarDataset(std::string ruta,
     // Traza de ejecución requerida 
     std::cout << "Procesando lineas del dataset" << std::endl;
 
-    std::string nombre_origen_temp, nombre_destino_temp;
+    int id_origen_temp, id_destino_temp;
 
     while (std::getline(archivo, linea)) {
         std::stringstream ss(linea);
@@ -520,31 +520,29 @@ void cargarDataset(std::string ruta,
             if (columna == 3) {
                 tail_num.push_back(celda);
             }
-            //Columna 4: Código Origen (ej: "ATL")
-            else if (columna == 4) {
-                nombre_origen_temp = celda;
-            }
-            // Columna 5: ID Aeropuerto Origen (ORIGIN_SEQ_ID) para Fase 04 
+            // Columna 5: ID Aeropuerto Origen (ORIGIN_SEQ_ID) 
             else if (columna == 5) {
-                if (celda.empty()) origin_id.push_back(0);
-                else {
-                    int id = std::stoi(celda);
+                if (!celda.empty()) {
+                    int id = (int)std::stof(celda);
                     origin_id.push_back(id);
-                    mapa_aeropuertos[id] = nombre_origen_temp;
+                    id_origen_temp = id; // Guardamos el ID para asociarlo luego al nombre
                 }
             }
-            //Columna 6: Código Destino (ej: "LAX")
+            // Columna 6: Nombre Aeropuerto Origen (JFK)
             else if (columna == 6) {
-                nombre_destino_temp = celda;
+                mapa_aeropuertos[id_origen_temp] = celda;
             }
-            // Columna 7: ID Aeropuerto Destino (DEST_SEQ_ID) para Fase 04 
+            // Columna 7: ID Aeropuerto Destino (DEST_SEQ_ID)
             else if (columna == 7) {
-                if (celda.empty()) dest_id.push_back(0);
-                else {
-                    int id = std::stoi(celda);
+                if (!celda.empty()) {
+                    int id = (int)std::stof(celda);
                     dest_id.push_back(id);
-                    mapa_aeropuertos[id] = nombre_destino_temp;
+                    id_destino_temp = id;
                 }
+            }
+            // Columna 8: Nombre Aeropuerto Destino (PHX)
+            else if (columna == 8) {
+                mapa_aeropuertos[id_destino_temp] = celda;
             }
             // Columna 10: Retraso Salida (DEP_DELAY) para Fase 01 
             else if (columna == 10) {

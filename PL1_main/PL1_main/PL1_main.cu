@@ -48,6 +48,8 @@ void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int varia
 
 void cargarFase04(std::vector<int>& vectorElegido, int umbral_hist, std::unordered_map<int, std::string>& mapa);
 
+void configurarGridEstandar(int n, int& blocks, int& threads);
+
 __global__ void fase01(float *d_retraso, int num_vuelos) {
     bool signo = true;
     // Calculamos el ID global
@@ -317,6 +319,7 @@ int main()
     std::cout << "Inicio de lectura de datos" << std::endl;
     cargarDataset(ruta_csv, h_dep_delay, h_arr_delay, h_tail_num, h_weather_delay, h_origin_id, h_dest_id, mapa_aeropuertos);
 
+    std::cout << "DEBUG: Vuelos totales en el vector: " << h_origin_id.size() << std::endl;
     char opcion;
     do {
         std::cout << "\nMenu de opciones:" << std::endl;
@@ -573,14 +576,9 @@ void cargarFase01(std::vector<float>& retrasosSalida, int umbral) {
     int num_vuelos = retrasosSalida.size();
     //Creamos una variable puntero donde se iniciará el vector en la GPU
     float* d_retrasos;
-    
-    //Buscamos el número de hilos que permite el ordenador, para que el programa pueda ser escalable
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-
-    int hilosPorBloque = prop.maxThreadsPerBlock;
-    //Calculamos el número de bloques que necesitamos con el máximo de hilos para abordar el vector completo
-    int bloques = (num_vuelos + hilosPorBloque - 1) / hilosPorBloque;
+    //Calculamos el numero de hilos y bloques
+    int bloques, hilosPorBloque;
+    configurarGridEstandar(num_vuelos, bloques, hilosPorBloque)
 
     std::cout << "[GPU] Procesando " << num_vuelos << " vuelos..." << std::endl;
 
@@ -731,9 +729,14 @@ void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int varia
             fase03_intermedia <<< blocks, threadsPerBlock, bytesCompartida >>>(d_datos, d_resultado, num_vuelos, operacion_elegida);
             break;
 
-        case VAR_PATRON:
-            fase03_patron <<< blocks, threadsPerBlock, bytesCompartida >>>(d_datos, d_resultado, num_vuelos, operacion_elegida);
+        case VAR_PATRON: {
+            //Cogemos 512 para que podamos dividir entre 2 y no haya fallo (potencia de 2)
+            int threadsPatron = 512;
+            int blocksPatron = (num_vuelos + threadsPatron - 1) / threadsPatron;
+            int bytesPatron = threadsPatron * sizeof(int);
+            fase03_patron << < blocksPatron, threadsPatron, bytesPatron >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
             break;
+        }
         }
     //Esperamos a todos los hilos
     cudaDeviceSynchronize();
@@ -806,4 +809,15 @@ void cargarFase04(std::vector<int>& vectorElegido, int umbral_hist, std::unorder
     //Limpieza
     cudaFree(d_ids);
     cudaFree(d_histograma);
+}
+
+// Función genérica para configurar los hilos y bloques
+void configurarGridEstandar(int n, int& blocks, int& threads) {
+    //Buscamos el número de hilos que permite el ordenador, para que el programa pueda ser escalable
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+
+    threads = prop.maxThreadsPerBlock; 
+    //Calculamos el número de bloques que necesitamos con el máximo de hilos para abordar el vector completo
+    blocks = (n + threads - 1) / threads;
 }

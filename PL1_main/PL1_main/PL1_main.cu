@@ -852,41 +852,102 @@ void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retr
 }
 
 void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int variante_elegida) {
+    //Calculamos el tamaño del vector de entrada
     int num_vuelos = retrasos.size();
-    float* d_datos; int* d_resultado; int h_resultado;
+    //Creamos los punteros que usaremos para guardar memoria en la gpu
+    float* d_datos;
+    int* d_resultado;
+    //Variable donde pasaremos el resultado de la gpu
+    int h_resultado;
+    //Creamos la variable de error para guardar errores
     cudaError_t error;
 
+    //Guardamos el espacio necesario para el vector y para la variable resultado en GPU
     error = cudaMalloc(&d_datos, num_vuelos * sizeof(float));
-    if (error != cudaSuccess) return;
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc: %s\n", cudaGetErrorString(error));
+        return;
+    }
     error = cudaMalloc(&d_resultado, sizeof(int));
-    if (error != cudaSuccess) { cudaFree(d_datos); return; }
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc: %s\n", cudaGetErrorString(error));
+        cudaFree(d_datos);
+        return;
+    }
 
-    cudaMemcpy(d_datos, retrasos.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
+    //Copiamos los datos del vector de entrada
+    error = cudaMemcpy(d_datos, retrasos.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+        cudaFree(d_datos); cudaFree(d_resultado);
+        return;
+    }
+
+    //Inicializamos el valor inicial de la variable resultado
+    //Si es un minimo pondremos un numero grande si es un maximo un numero pequeño
     int valor_inicial = (operacion_elegida == OP_MAX) ? -999999 : 999999;
-    cudaMemcpy(d_resultado, &valor_inicial, sizeof(int), cudaMemcpyHostToDevice);
+    //Lo copiamos a la variable de la GPU
+    error = cudaMemcpy(d_resultado, &valor_inicial, sizeof(int), cudaMemcpyHostToDevice);
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+        cudaFree(d_datos); cudaFree(d_resultado);
+        return;
+    }
 
+    //Calculamos el numero de hilos y bloques
     int bloques, hilosPorBloque;
     configurarGridEstandar(num_vuelos, bloques, hilosPorBloque);
+    //Calculamos los bytes necesarios para la memoria compartida de los bloques (se usa en parte2,3,4)
     int bytesCompartida = hilosPorBloque * sizeof(int);
-
     switch (variante_elegida) {
-    case VAR_SIMPLE: fase03_simple << < bloques, hilosPorBloque >> > (d_datos, d_resultado, num_vuelos, operacion_elegida); break;
-    case VAR_BASICA: fase03_basica << < bloques, hilosPorBloque, bytesCompartida >> > (d_datos, d_resultado, num_vuelos, operacion_elegida); break;
-    case VAR_INTERMEDIA: fase03_intermedia << < bloques, hilosPorBloque, bytesCompartida >> > (d_datos, d_resultado, num_vuelos, operacion_elegida); break;
+    case VAR_SIMPLE:
+        fase03_simple << < bloques, hilosPorBloque >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
+        break;
+
+    case VAR_BASICA:
+        //Ponemos de tercer parámetro la cantidad de memoria compartida que necesitamos en cada bloque en los <<< >>>
+        fase03_basica << < bloques, hilosPorBloque, bytesCompartida >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
+
+        break;
+
+    case VAR_INTERMEDIA:
+        //Seguimos trayendonos todos los datos a memoria compartida pero solo un hilo manda el max o min
+        fase03_intermedia << < bloques, hilosPorBloque, bytesCompartida >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
+        break;
+
     case VAR_PATRON: {
-        int tP = 512; int bP = (num_vuelos + tP - 1) / tP;
-        fase03_patron << < bP, tP, tP * sizeof(int) >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
+        //Cogemos 512 para que podamos dividir entre 2 y no haya fallo (potencia de 2)
+        int threadsPatron = 512;
+        int blocksPatron = (num_vuelos + threadsPatron - 1) / threadsPatron;
+        int bytesPatron = threadsPatron * sizeof(int);
+        fase03_patron << < blocksPatron, threadsPatron, bytesPatron >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
         break;
     }
     }
 
+    //Esperamos a todos los hilos
     error = cudaDeviceSynchronize();
-    if (error == cudaSuccess) {
-        cudaMemcpy(&h_resultado, d_resultado, sizeof(int), cudaMemcpyDeviceToHost);
-        std::string n_op = (operacion_elegida == OP_MAX) ? "MAXIMO" : "MINIMO";
-        std::cout << "\n[GPU] El valor " << n_op << " es: " << h_resultado << " min." << std::endl;
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaSynchronize: %s\n", cudaGetErrorString(error));
+        cudaFree(d_datos); cudaFree(d_resultado);
+        return;
     }
-    cudaFree(d_datos); cudaFree(d_resultado);
+
+    //Copiamos del resultado de la GPU a CPU
+    error = cudaMemcpy(&h_resultado, d_resultado, sizeof(int), cudaMemcpyDeviceToHost);
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+    }
+    else {
+        std::string nombre_op = (operacion_elegida == OP_MAX) ? "MAXIMO" : "MINIMO";
+        std::cout << "\n[GPU] El valor " << nombre_op << " encontrado es: " << h_resultado << " minutos." << std::endl;
+    }
+
+    //Liberamos la memoria
+    cudaFree(d_datos);
+    cudaFree(d_resultado);
+
+    std::cout << "[GPU] Fase 03 finalizada y memoria liberada." << std::endl;
 }
 
 // Estructura para manejar los datos y poder ordenarlos

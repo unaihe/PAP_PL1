@@ -8,6 +8,7 @@
 #include <sstream>
 #include <cmath>
 #include <unordered_map>
+#include <algorithm>
 //fase2
 #define MAX_MATRICULA 16
 //fase3 (definimos las opciones para no tener que comparar strings)
@@ -356,31 +357,51 @@ int main()
         }
         case '1': {
             if (!datos_listos)
-            { 
+            {
                 std::cout << "[!] Error: No hay datos cargados. Comprueba la ruta en la opcion (0)." << std::endl;
             }
             else {
-                // Retraso en despegues 
+                // Retraso en despegues (Mejora: 2 parámetros)
+                int tipo; // 0 para Retraso, 1 para Adelanto
                 int umbral;
-                std::string entrada;
+                std::string entrada_tipo, entrada_umbral;
 
                 // Limpiamos el buffer del '1' que elegimos en el menú para que no interfiera
                 std::cin.ignore(1000, '\n');
 
-                // Bucle para asegurar que el usuario introduce un valor correcto y no deje el campo vacio
+                // Bucle para validar la selección del tipo de retraso
                 while (true) {
-                    std::cout << "Introduce el umbral de retraso (minutos): ";
+                    std::cout << "Seleccione tipo (0: Retraso / 1: Adelanto): ";
+                    if (!std::getline(std::cin, entrada_tipo)) continue;
+                    if (entrada_tipo.empty()) continue;
+
+                    try {
+                        tipo = std::stoi(entrada_tipo);
+                        if (tipo == 0 || tipo == 1) break; // Valor correcto
+                        else std::cout << "Error: Seleccione 0 para Retraso o 1 para Adelanto." << std::endl;
+                    }
+                    catch (...) {
+                        std::cout << "Error: Introduzca un numero valido (0 o 1)." << std::endl;
+                    }
+                }
+
+                // Bucle para asegurar que el usuario introduce un valor correcto del UMBRAL
+                while (true) {
+                    std::cout << "Introduce el umbral en minutos (valor positivo): ";
 
                     // Leemos la linea completa para evitar errores si el usuario mete letras o espacios
-                    if (!std::getline(std::cin, entrada)) continue;
+                    if (!std::getline(std::cin, entrada_umbral)) continue;
 
                     // Si solo pulsa Enter sin escribir nada, volvemos a preguntar
-                    if (entrada.empty()) continue;
+                    if (entrada_umbral.empty()) continue;
 
                     try {
                         // Intentamos convertir el texto a numero entero
-                        umbral = std::stoi(entrada);
-                        break; // Si la conversion tiene exito, salimos del bucle de validacion
+                        umbral = std::stoi(entrada_umbral);
+
+                        // Si es negativo, lo pasamos a positivo para aplicar la lógica según el tipo
+                        umbral = std::abs(umbral);
+                        break;
                     }
                     catch (...) {
                         // Si salta un error (letras, simbolos...), avisamos al usuario
@@ -388,9 +409,17 @@ int main()
                     }
                 }
 
-                std::cout << "Ejecutando Fase 01 con umbral: " << umbral << "..." << std::endl;
-                //Llamada a la función con el umbral determinado
-                //Llamamos a cargarFase porque es la que llama a fase01 , prepara los espacios de memoria y copia los vectores
+                // AJUSTE INTERNO: Si eligió Adelanto (1), el umbral debe ser negativo para el Kernel
+                if (tipo == 1) {
+                    umbral = -umbral;
+                    std::cout << "Ejecutando Fase 01 para ADELANTOS (<= " << umbral << " min)..." << std::endl;
+                }
+                else {
+                    std::cout << "Ejecutando Fase 01 para RETRASOS (>= " << umbral << " min)..." << std::endl;
+                }
+
+                // Llamada a la función con el umbral determinado
+                // Llamamos a cargarFase porque es la que llama a fase01, prepara los espacios de memoria y copia los vectores
                 cargarFase01(h_dep_delay, umbral);
 
                 break;
@@ -402,33 +431,61 @@ int main()
                 std::cout << "[!] Error: No hay datos cargados. Comprueba la ruta en la opcion (0)." << std::endl;
             }
             else {
-                // Retraso en aterrizajes 
-                //Variables para el umbral
+                // Retraso en aterrizajes (Mejora: 2 parámetros)
+                int tipo_llegada; // 0 para Retraso, 1 para Adelanto
                 int umbral_llegada;
-                std::string entrada_f2;
+                std::string entrada_tipo, entrada_umbral;
 
-                //Limpiamos el buffer por si acaso
+                // Limpiamos el buffer por si acaso
                 std::cin.ignore(1000, '\n');
 
-                //Bucle de validación (Igual que en Fase 1)
+                // Bucle de validación para el TIPO de llegada
                 while (true) {
                     std::cout << "\n--- FASE 02: Analisis de Llegadas ---" << std::endl;
-                    std::cout << "Introduce el umbral (positivo para retraso, negativo para adelanto): ";
+                    std::cout << "Seleccione tipo de llegada (0: Retraso / 1: Adelanto): ";
 
-                    if (!std::getline(std::cin, entrada_f2)) continue;
-                    if (entrada_f2.empty()) continue;
+                    if (!std::getline(std::cin, entrada_tipo)) continue;
+                    if (entrada_tipo.empty()) continue;
 
                     try {
-                        umbral_llegada = std::stoi(entrada_f2);
-                        break; // Si es un número válido, salimos del bucle
+                        tipo_llegada = std::stoi(entrada_tipo);
+                        if (tipo_llegada == 0 || tipo_llegada == 1) break; // Valor válido
+                        else std::cout << "Error: Seleccione 0 para Retraso o 1 para Adelanto." << std::endl;
                     }
                     catch (...) {
-                        std::cout << "Error: Por favor, introduce un numero entero (ej: 1440 o -30)." << std::endl;
+                        std::cout << "Error: Por favor, introduce un numero valido (0 o 1)." << std::endl;
                     }
                 }
-                std::cout << "Ejecutando Fase 02 con umbral " << umbral_llegada << "..." << std::endl;
 
-                //Llamada a la función cargarFase02 (igual que con la fase1)
+                // Bucle de validación para el VALOR del umbral
+                while (true) {
+                    std::cout << "Introduce el umbral en minutos (valor positivo): ";
+
+                    if (!std::getline(std::cin, entrada_umbral)) continue;
+                    if (entrada_umbral.empty()) continue;
+
+                    try {
+                        umbral_llegada = std::stoi(entrada_umbral);
+
+                        // Aseguramos que el valor sea positivo para tratarlo según el tipo
+                        umbral_llegada = std::abs(umbral_llegada);
+                        break;
+                    }
+                    catch (...) {
+                        std::cout << "Error: Por favor, introduce un numero entero (ej: 30 o 60)." << std::endl;
+                    }
+                }
+
+                // AJUSTE LÓGICO: Si es Adelanto (1), el umbral debe ser negativo para que el Kernel filtre correctamente
+                if (tipo_llegada == 1) {
+                    umbral_llegada = -umbral_llegada;
+                    std::cout << "Ejecutando Fase 02 para ADELANTOS (<= " << umbral_llegada << " min)..." << std::endl;
+                }
+                else {
+                    std::cout << "Ejecutando Fase 02 para RETRASOS (>= " << umbral_llegada << " min)..." << std::endl;
+                }
+
+                // Llamada a la función cargarFase02 (igual que con la fase1)
                 cargarFase02(h_tail_num, h_arr_delay, umbral_llegada);
                 break;
             }
@@ -625,30 +682,50 @@ void cargarFase01(std::vector<float>& retrasosSalida, int umbral) {
     //Calculamos el numero de hilos y bloques
     int bloques, hilosPorBloque;
     configurarGridEstandar(num_vuelos, bloques, hilosPorBloque);
+    //Creamos la variable de error para guardar errores
+    cudaError_t error;
 
     std::cout << "[GPU] Procesando " << num_vuelos << " vuelos..." << std::endl;
 
     //Guardamos la memoria necesaria en la gpu a través del tamaño del vector calculado con el .size
-    cudaMalloc(&d_retrasos, num_vuelos * sizeof(float));
+    error = cudaMalloc(&d_retrasos, num_vuelos * sizeof(float));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //Copiamos a la memoria de la GPU el vector entero de retrasos
-    cudaMemcpy(d_retrasos, retrasosSalida.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
-
+    error = cudaMemcpy(d_retrasos, retrasosSalida.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //Ponemos la variable en memoria
-    cudaMemcpyToSymbol(d_umbral, &umbral, sizeof(int));
-
+    error = cudaMemcpyToSymbol(d_umbral, &umbral, sizeof(int));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //Llamamos a la función de la GPU para que procese todos los datos
-    fase01 <<< bloques, hilosPorBloque >>> (d_retrasos, num_vuelos);
+    fase01 << < bloques, hilosPorBloque >> > (d_retrasos, num_vuelos);
 
     //Sincronizamos todos los hilos(para comprobar que todos han terminado)
-    cudaDeviceSynchronize();
+    error = cudaDeviceSynchronize();
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaSynchronize: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //Liberamos la memoria de la GPU
-    cudaFree(d_retrasos);
-
+    error = cudaFree(d_retrasos);
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaFree: %s\n", cudaGetErrorString(error));
+        return;
+    }
     std::cout << "[GPU] Analisis finalizado." << std::endl;
 }
 
 void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retrasosLlegada, int umbral) {
     int num_vuelos = h_tail_num.size();
+    cudaError_t error;
 
     //Buscamos la matrícula más larga (Se utilizará como dato para guardar memoria necesaria)
     int max_long = 0;
@@ -672,34 +749,71 @@ void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retr
     char* d_tail_num_sal;
 
     //Guardamos la memoria necesaria en gpu para los vectores de matriculas y de llegadas
-    cudaMalloc(&d_arr_delay_ent,num_vuelos*sizeof(float));
-    cudaMalloc(&d_tail_num_ent, num_vuelos * MAX_MATRICULA * sizeof(char));
+    error = cudaMalloc(&d_arr_delay_ent, num_vuelos * sizeof(float));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc: %s\n", cudaGetErrorString(error));
+        return;
+    }
+    error = cudaMalloc(&d_tail_num_ent, num_vuelos * MAX_MATRICULA * sizeof(char));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //También reservamos para los vectores con las soluciones (mismo tamaño por si el peor caso todos son solucion)
-    cudaMalloc(&d_arr_delay_sal, num_vuelos * sizeof(float));
-    cudaMalloc(&d_tail_num_sal, num_vuelos * MAX_MATRICULA * sizeof(char));
+    error = cudaMalloc(&d_arr_delay_sal, num_vuelos * sizeof(float));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc: %s\n", cudaGetErrorString(error));
+        return;
+    }
+    error = cudaMalloc(&d_tail_num_sal, num_vuelos * MAX_MATRICULA * sizeof(char));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //Copiamos los datos a la gpu
-    cudaMemcpy(d_arr_delay_ent,retrasosLlegada.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_tail_num_ent, h_tail_num_c.data(), num_vuelos * MAX_MATRICULA * sizeof(char), cudaMemcpyHostToDevice);
-
+    error = cudaMemcpy(d_arr_delay_ent, retrasosLlegada.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc: %s\n", cudaGetErrorString(error));
+        return;
+    }
+    error = cudaMemcpy(d_tail_num_ent, h_tail_num_c.data(), num_vuelos * MAX_MATRICULA * sizeof(char), cudaMemcpyHostToDevice);
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //Calculamos el numero de hilos y bloques
     int bloques, hilosPorBloque;
     configurarGridEstandar(num_vuelos, bloques, hilosPorBloque);
 
     //Ponemos el contador de la GPU a cero (lo usaremos para que no haya condiciones de carrera)
     int cero = 0;
-    cudaMemcpyToSymbol(d_contador_f02, &cero, sizeof(int));
+    error = cudaMemcpyToSymbol(d_contador_f02, &cero, sizeof(int));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //Pasamos el umbral que el usuario eligió 
-    cudaMemcpyToSymbol(d_umbral_f02, &umbral, sizeof(int));
-
+    error = cudaMemcpyToSymbol(d_umbral_f02, &umbral, sizeof(int));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //Llamamos a la función de la GPU para que procese todos los datos
-    fase02 <<< bloques, hilosPorBloque >>> (d_arr_delay_ent,d_arr_delay_sal,d_tail_num_ent,d_tail_num_sal,num_vuelos);
-    
-    //Sincronizamos todos los hilos(para comprobar que todos han terminado)
-    cudaDeviceSynchronize();
+    fase02 << < bloques, hilosPorBloque >> > (d_arr_delay_ent, d_arr_delay_sal, d_tail_num_ent, d_tail_num_sal, num_vuelos);
 
+    //Sincronizamos todos los hilos(para comprobar que todos han terminado)
+    error = cudaDeviceSynchronize();
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en synchronize: %s\n", cudaGetErrorString(error));
+        return;
+    }
     //Miramos el numero de soluciones que hay(longitud del array solucion) 
     int vuelos_solucion;
-    cudaMemcpyFromSymbol(&vuelos_solucion, d_contador_f02, sizeof(int));
+    error = cudaMemcpyFromSymbol(&vuelos_solucion, d_contador_f02, sizeof(int));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+        return;
+    }
 
     if (vuelos_solucion > 0) {
         //Preparamos vectores en la CPU para recibir los datos
@@ -707,9 +821,16 @@ void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retr
         std::vector<char> h_mats_res(vuelos_solucion * MAX_MATRICULA);
 
         //Copiamos los resultados de la salida de la GPU a nuestros vectores de la CPU
-        cudaMemcpy(h_tiempos_res.data(), d_arr_delay_sal, vuelos_solucion * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_mats_res.data(), d_tail_num_sal, vuelos_solucion * MAX_MATRICULA * sizeof(char), cudaMemcpyDeviceToHost);
-
+        error = cudaMemcpy(h_tiempos_res.data(), d_arr_delay_sal, vuelos_solucion * sizeof(float), cudaMemcpyDeviceToHost);
+        if (error != cudaSuccess) {
+            fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+            return;
+        }
+        error = cudaMemcpy(h_mats_res.data(), d_tail_num_sal, vuelos_solucion * MAX_MATRICULA * sizeof(char), cudaMemcpyDeviceToHost);
+        if (error != cudaSuccess) {
+            fprintf(stderr, "Error en cudaMemcpy: %s\n", cudaGetErrorString(error));
+            return;
+        }
         //Mostramos los resultados por pantalla
         std::cout << "Se han detectado " << vuelos_solucion << " vuelos:" << std::endl;
         for (int i = 0; i < vuelos_solucion; i++) {
@@ -731,121 +852,141 @@ void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retr
 }
 
 void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int variante_elegida) {
-    //Calculamos el tamaño del vector de entrada
     int num_vuelos = retrasos.size();
-    //Creamos los punteros que usaremos para guardar memoria en la gpu
-    float* d_datos;
-    int* d_resultado;
-    //Variable donde pasaremos el resultado de la gpu
-    int h_resultado;
+    float* d_datos; int* d_resultado; int h_resultado;
+    cudaError_t error;
 
-    //Guardamos el espacio necesario para el vector y para la variable resultado en GPU
-    cudaMalloc(&d_datos, num_vuelos * sizeof(float));
-    cudaMalloc(&d_resultado, sizeof(int));
-    //Copiamos los datos del vector de entrada
+    error = cudaMalloc(&d_datos, num_vuelos * sizeof(float));
+    if (error != cudaSuccess) return;
+    error = cudaMalloc(&d_resultado, sizeof(int));
+    if (error != cudaSuccess) { cudaFree(d_datos); return; }
+
     cudaMemcpy(d_datos, retrasos.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
-    //Inicializamos el valor inicial de la variable resultado
-    //Si es un minimo pondremos un numero grande si es un maximo un numero pequeño
     int valor_inicial = (operacion_elegida == OP_MAX) ? -999999 : 999999;
-    //Lo copiamos a la variable de la GPU
     cudaMemcpy(d_resultado, &valor_inicial, sizeof(int), cudaMemcpyHostToDevice);
-    //Calculamos el numero de hilos y bloques
+
     int bloques, hilosPorBloque;
     configurarGridEstandar(num_vuelos, bloques, hilosPorBloque);
-    //Calculamos los bytes necesarios para la memoria compartida de los bloques (se usa en parte2,3,4)
     int bytesCompartida = hilosPorBloque * sizeof(int);
+
     switch (variante_elegida) {
-        case VAR_SIMPLE:
-            fase03_simple <<< bloques, hilosPorBloque >>> (d_datos, d_resultado, num_vuelos, operacion_elegida);
-            break;
+    case VAR_SIMPLE: fase03_simple << < bloques, hilosPorBloque >> > (d_datos, d_resultado, num_vuelos, operacion_elegida); break;
+    case VAR_BASICA: fase03_basica << < bloques, hilosPorBloque, bytesCompartida >> > (d_datos, d_resultado, num_vuelos, operacion_elegida); break;
+    case VAR_INTERMEDIA: fase03_intermedia << < bloques, hilosPorBloque, bytesCompartida >> > (d_datos, d_resultado, num_vuelos, operacion_elegida); break;
+    case VAR_PATRON: {
+        int tP = 512; int bP = (num_vuelos + tP - 1) / tP;
+        fase03_patron << < bP, tP, tP * sizeof(int) >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
+        break;
+    }
+    }
 
-        case VAR_BASICA:
-            //Ponemos de tercer parámetro la cantidad de memoria compartida que necesitamos en cada bloque en los <<< >>>
-            fase03_basica <<< bloques, hilosPorBloque, bytesCompartida >>> (d_datos, d_resultado, num_vuelos, operacion_elegida);
-            
-            break;
-
-        case VAR_INTERMEDIA:
-            //Seguimos trayendonos todos los datos a memoria compartida pero solo un hilo manda el max o min
-            fase03_intermedia <<< bloques, hilosPorBloque, bytesCompartida >>>(d_datos, d_resultado, num_vuelos, operacion_elegida);
-            break;
-
-        case VAR_PATRON: {
-            //Cogemos 512 para que podamos dividir entre 2 y no haya fallo (potencia de 2)
-            int threadsPatron = 512;
-            int blocksPatron = (num_vuelos + threadsPatron - 1) / threadsPatron;
-            int bytesPatron = threadsPatron * sizeof(int);
-            fase03_patron << < blocksPatron, threadsPatron, bytesPatron >> > (d_datos, d_resultado, num_vuelos, operacion_elegida);
-            break;
-        }
-        }
-    //Esperamos a todos los hilos
-    cudaDeviceSynchronize();
-    //Copiamos del resultado de la GPU a CPU
-    cudaMemcpy(&h_resultado, d_resultado, sizeof(int), cudaMemcpyDeviceToHost);
-    std::string nombre_op = (operacion_elegida == OP_MAX) ? "MAXIMO" : "MINIMO";
-    std::cout << "\n[GPU] El valor " << nombre_op << " encontrado es: " << h_resultado << " minutos." << std::endl;
-
-    //Liberamos la memoria
-    cudaFree(d_datos);
-    cudaFree(d_resultado);
-
-    std::cout << "[GPU] Fase 03 finalizada y memoria liberada." << std::endl;
+    error = cudaDeviceSynchronize();
+    if (error == cudaSuccess) {
+        cudaMemcpy(&h_resultado, d_resultado, sizeof(int), cudaMemcpyDeviceToHost);
+        std::string n_op = (operacion_elegida == OP_MAX) ? "MAXIMO" : "MINIMO";
+        std::cout << "\n[GPU] El valor " << n_op << " es: " << h_resultado << " min." << std::endl;
+    }
+    cudaFree(d_datos); cudaFree(d_resultado);
 }
 
+// Estructura para manejar los datos y poder ordenarlos
+struct DatosAeropuerto {
+    int id;
+    int conteo;
+    std::string nombre;
+};
+
 void cargarFase04(std::vector<int>& vectorElegido, int umbral_hist, std::unordered_map<int, std::string>& mapa) {
-    //Calculamos el numero de vuelos total en el vector
     int num_vuelos = vectorElegido.size();
     if (num_vuelos == 0) return;
-    //Calculamos el id maximo entre todos los vuelos para saber cuanta memoria reservar
+    //Creamos la variable de error para guardar errores
+    cudaError_t error;
+
+    // Cálculo del ID máximo para dimensionar el histograma
     int max_id = 0;
-    for (int id : vectorElegido) {
-        if (id > max_id) max_id = id;
-    }
+    for (int id : vectorElegido) { if (id > max_id) max_id = id; }
     int tam_histograma = max_id + 1;
-    //Creamos los punteros para reservar el espacio
-    int* d_ids;
-    int* d_histograma;
-    //Reservamos el espacio
-    cudaMalloc(&d_ids, num_vuelos * sizeof(int));
-    cudaMalloc(&d_histograma, tam_histograma * sizeof(int));
-    //Inicializamos el histograma a 0 para eliminar valores basura
-    cudaMemset(d_histograma, 0, tam_histograma * sizeof(int));
-    //Copiamos los datos del vecrtor elegido por el usario a la gpu
-    cudaMemcpy(d_ids, vectorElegido.data(), num_vuelos * sizeof(int), cudaMemcpyHostToDevice);
-    //Calculamos el numero de hilos y bloques
+
+    int* d_ids, * d_histograma;
+
+    // Reservamos y comprobamos errores
+    error = cudaMalloc(&d_ids, num_vuelos * sizeof(int));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc (ids): %s\n", cudaGetErrorString(error));
+        return;
+    }
+    error = cudaMalloc(&d_histograma, tam_histograma * sizeof(int));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMalloc (hist): %s\n", cudaGetErrorString(error));
+        cudaFree(d_ids);
+        return;
+    }
+
+    // Inicializamos el histograma a 0 y comprobamos
+    error = cudaMemset(d_histograma, 0, tam_histograma * sizeof(int));
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemset: %s\n", cudaGetErrorString(error));
+        cudaFree(d_ids); cudaFree(d_histograma);
+        return;
+    }
+
+    // Copiamos los datos y comprobamos
+    error = cudaMemcpy(d_ids, vectorElegido.data(), num_vuelos * sizeof(int), cudaMemcpyHostToDevice);
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy (H2D ids): %s\n", cudaGetErrorString(error));
+        cudaFree(d_ids); cudaFree(d_histograma);
+        return;
+    }
+
     int bloques, hilosPorBloque;
     configurarGridEstandar(num_vuelos, bloques, hilosPorBloque);
-    //Ejecutamos la funcion de la fase4
-    std::cout << "[GPU] Generando histograma con " << tam_histograma << " posibles aeropuertos..." << std::endl;
-    fase04 <<< bloques, hilosPorBloque >>> (d_ids, d_histograma, num_vuelos, tam_histograma);
-    //Esperamos a todos los hilos
-    cudaDeviceSynchronize();
-    //Copiamos los resultados
+
+    std::cout << "[GPU] Generando histograma..." << std::endl;
+    fase04 << < bloques, hilosPorBloque >> > (d_ids, d_histograma, num_vuelos, tam_histograma);
+
+    // Sincronizamos y comprobamos errores del kernel
+    error = cudaDeviceSynchronize();
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaSynchronize (Kernel F04): %s\n", cudaGetErrorString(error));
+        cudaFree(d_ids); cudaFree(d_histograma);
+        return;
+    }
+
     std::vector<int> h_histograma(tam_histograma);
-    cudaMemcpy(h_histograma.data(), d_histograma, tam_histograma * sizeof(int), cudaMemcpyDeviceToHost);
-    //Mostramos los resultados
-    std::cout << "\n--- RESULTADOS DEL HISTOGRAMA (Umbral: " << umbral_hist << ") ---" << std::endl;
-    int unicos = 0;
+    error = cudaMemcpy(h_histograma.data(), d_histograma, tam_histograma * sizeof(int), cudaMemcpyDeviceToHost);
+    if (error != cudaSuccess) {
+        fprintf(stderr, "Error en cudaMemcpy (D2H hist): %s\n", cudaGetErrorString(error));
+        cudaFree(d_ids); cudaFree(d_histograma);
+        return;
+    }
+
+    // Filtrado y Ordenación en Host
+    std::vector<DatosAeropuerto> listaOrdenada;
     for (int i = 0; i < tam_histograma; i++) {
         if (h_histograma[i] >= umbral_hist) {
-            unicos++;
-            // Buscamos el nombre en el mapa, si no está ponemos el ID
             std::string nombre = (mapa.count(i)) ? mapa[i] : "ID:" + std::to_string(i);
-
-            // Visualización visual (una barra por cada 1000 ocurrencias, por ejemplo)
-            printf("%-6s [%-7d]: ", nombre.c_str(), h_histograma[i]);
-
-            int num_barras = h_histograma[i] / 2000; // Ajusta este divisor según el tamaño de tu dataset
-            for (int b = 0; b < num_barras && b < 40; b++) std::cout << "I";
-            std::cout << std::endl;
+            listaOrdenada.push_back({ i, h_histograma[i], nombre });
         }
+    }
+
+    std::sort(listaOrdenada.begin(), listaOrdenada.end(), [](const DatosAeropuerto& a, const DatosAeropuerto& b) {
+        return a.conteo > b.conteo;
+        });
+
+    // Histograma con Colores ANSI
+    std::cout << "\n\033[1;36m--- RESULTADOS DEL HISTOGRAMA (Ordenados por importancia) ---\033[0m" << std::endl;
+
+    for (const auto& aero : listaOrdenada) {
+        std::string color = (aero.conteo > 40000) ? "\033[1;31m" : (aero.conteo > 35000 ? "\033[1;33m" : "\033[1;32m");
+        printf("%-15s [%-7d]: %s", aero.nombre.c_str(), aero.conteo, color.c_str());
+        int num_barras = aero.conteo / 1500;
+        for (int b = 0; b < num_barras; b++) std::cout << "█";
+        std::cout << "\033[0m" << std::endl;
     }
 
     std::cout << "--------------------------------------------------------" << std::endl;
-    std::cout << "Aeropuertos unicos que superan el umbral: " << unicos << std::endl;
+    std::cout << "Aeropuertos mostrados: " << listaOrdenada.size() << std::endl;
 
-    //Limpieza
     cudaFree(d_ids);
     cudaFree(d_histograma);
 }
@@ -861,6 +1002,7 @@ void configurarGridEstandar(int n, int& blocks, int& threads) {
     blocks = (n + threads - 1) / threads;
 }
 
+//Cargado de datos
 void resetYCargar(std::string ruta,
     std::vector<float>& v1, std::vector<float>& v2,
     std::vector<std::string>& v3, std::vector<float>& v4,

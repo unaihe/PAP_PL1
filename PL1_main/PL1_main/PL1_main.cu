@@ -40,6 +40,16 @@ void cargarDataset(std::string ruta,
     std::vector<int>& dest_id,
     std::unordered_map<int, std::string>& mapa_aeropuertos);
 
+void resetYCargar(std::string ruta,
+    std::vector<float>& dep_delay,
+    std::vector<float>& arr_delay,
+    std::vector<std::string>& tail_num,
+    std::vector<float>& weather_delay,
+    std::vector<int>& origin_id,
+    std::vector<int>& dest_id,
+    std::unordered_map<int, std::string>& mapa_aeropuertos,
+    bool& estado);
+
 void cargarFase01(std::vector<float>& retrasos, int umbral);
 
 void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retrasos, int umbral);
@@ -307,22 +317,24 @@ int main()
 
     //Ruta al csv con los datos
     std::string ruta_csv;
+    bool datos_listos = false;
     //Opcion para insertar ruta por teclado o elegir la generica
     std::cout << "Introduzca la ruta base del dataset (Enter para ruta por defecto): ";
     std::getline(std::cin, ruta_csv);
-    //Si ruta_csv es vacio, se usa la ruta por defecto 
+
     if (ruta_csv.empty()) {
-        ruta_csv = "C:\\Users\\Unai\\OneDrive\\Documentos\\Airline_dataset.csv"; 
+        ruta_csv = "C:\\Users\\Unai\\OneDrive\\Documentos\\Airline_dataset.csv";
     }
 
-    //Leer el CSV de datos
-    std::cout << "Inicio de lectura de datos" << std::endl;
-    cargarDataset(ruta_csv, h_dep_delay, h_arr_delay, h_tail_num, h_weather_delay, h_origin_id, h_dest_id, mapa_aeropuertos);
+    // cargado de datos
+    resetYCargar(ruta_csv, h_dep_delay, h_arr_delay, h_tail_num, h_weather_delay, h_origin_id, h_dest_id, mapa_aeropuertos, datos_listos);
 
+    
     std::cout << "DEBUG: Vuelos totales en el vector: " << h_origin_id.size() << std::endl;
     char opcion;
     do {
         std::cout << "\nMenu de opciones:" << std::endl;
+        std::cout << "(0) Cambio de ruta" << std::endl;
         std::cout << "(1) Retraso en salida" << std::endl;
         std::cout << "(2) Retraso en llegada" << std::endl;
         std::cout << "(3) Reduccion de retraso" << std::endl;
@@ -332,149 +344,183 @@ int main()
         std::cin >> opcion;
 
         switch (opcion) {
+        case '0': {
+            std::cout << "Introduce la nueva ruta: ";
+            std::cin.ignore(1000, '\n');
+            std::getline(std::cin, ruta_csv);
+
+            //Carga automatica tras el cambio
+            resetYCargar(ruta_csv, h_dep_delay, h_arr_delay, h_tail_num, h_weather_delay, h_origin_id, h_dest_id, mapa_aeropuertos, datos_listos);
+
+            break;
+        }
         case '1': {
-            // Retraso en despegues 
-            int umbral;
-            std::string entrada;
-            
-            // Limpiamos el buffer del '1' que elegimos en el menú para que no interfiera
-            std::cin.ignore(1000, '\n');
-
-            // Bucle para asegurar que el usuario introduce un valor correcto y no deje el campo vacio
-            while (true) {
-                std::cout << "Introduce el umbral de retraso (minutos): ";
-
-                // Leemos la linea completa para evitar errores si el usuario mete letras o espacios
-                if (!std::getline(std::cin, entrada)) continue;
-
-                // Si solo pulsa Enter sin escribir nada, volvemos a preguntar
-                if (entrada.empty()) continue;
-
-                try {
-                    // Intentamos convertir el texto a numero entero
-                    umbral = std::stoi(entrada);
-                    break; // Si la conversion tiene exito, salimos del bucle de validacion
-                }
-                catch (...) {
-                    // Si salta un error (letras, simbolos...), avisamos al usuario
-                    std::cout << "Error: Debes introducir un numero entero valido." << std::endl;
-                }
-            }
-
-            std::cout << "Ejecutando Fase 01 con umbral: " << umbral << "..." << std::endl;
-            //Llamada a la función con el umbral determinado
-            //Llamamos a cargarFase porque es la que llama a fase01 , prepara los espacios de memoria y copia los vectores
-            cargarFase01(h_dep_delay, umbral);
-
-            break;
-        }
-        case '2': {
-            // Retraso en aterrizajes 
-            //Variables para el umbral
-            int umbral_llegada;
-            std::string entrada_f2;
-
-            //Limpiamos el buffer por si acaso
-            std::cin.ignore(1000, '\n');
-
-            //Bucle de validación (Igual que en Fase 1)
-            while (true) {
-                std::cout << "\n--- FASE 02: Analisis de Llegadas ---" << std::endl;
-                std::cout << "Introduce el umbral (positivo para retraso, negativo para adelanto): ";
-
-                if (!std::getline(std::cin, entrada_f2)) continue;
-                if (entrada_f2.empty()) continue;
-
-                try {
-                    umbral_llegada = std::stoi(entrada_f2);
-                    break; // Si es un número válido, salimos del bucle
-                }
-                catch (...) {
-                    std::cout << "Error: Por favor, introduce un numero entero (ej: 1440 o -30)." << std::endl;
-                }
-            }
-            std::cout << "Ejecutando Fase 02 con umbral " << umbral_llegada << "..." << std::endl;
-
-            //Llamada a la función cargarFase02 (igual que con la fase1)
-            cargarFase02(h_tail_num, h_arr_delay, umbral_llegada);
-            break;
-        }
-        case '3': {
-            //Máximos/Mínimos 
-            int col_sel, op_sel, var_sel;
-
-            std::cout << "\n--- FASE 03: Reduccion de Retraso ---" << std::endl;
-
-            //Selección de Columna
-            std::cout << "Seleccione columna (" << COL_DEP << ":DEP, " << COL_ARR << ":ARR, " << COL_WEATHER << ":WEA): ";
-            if (!(std::cin >> col_sel) || col_sel < 0 || col_sel > 2) {
-                std::cout << "Error: Seleccion de columna no valida." << std::endl;
-                std::cin.clear(); std::cin.ignore(1000, '\n');
-                break;
-            }
-
-            //Selección de Operación
-            std::cout << "Seleccione operacion (" << OP_MAX << ":Max, " << OP_MIN << ":Min): ";
-            if (!(std::cin >> op_sel) || (op_sel != OP_MAX && op_sel != OP_MIN)) {
-                std::cout << "Error: Operacion no valida." << std::endl;
-                std::cin.clear(); std::cin.ignore(1000, '\n');
-                break;
-            }
-
-            //Selección de Variante
-            std::cout << "Seleccione variante (1:Simple, 2:Basica, 3:Intermedia, 4:Patron): ";
-            if (!(std::cin >> var_sel) || var_sel < 1 || var_sel > 4) {
-                std::cout << "Error: Variante no valida." << std::endl;
-                std::cin.clear(); std::cin.ignore(1000, '\n');
-                break;
-            }
-
-            //Pasamos el vector correcto según la elección
-            if (col_sel == COL_DEP) {
-                cargarFase03(h_dep_delay, op_sel, var_sel);
-            }
-            else if (col_sel == COL_ARR) {
-                cargarFase03(h_arr_delay, op_sel, var_sel);
-            }
-            else if (col_sel == COL_WEATHER) {
-                cargarFase03(h_weather_delay, op_sel, var_sel);
-            }
-
-            break;
-        }
-        case '4': {
-            // Histograma 
-            int tipo_sel; // 0 para Origen, 1 para Destino
-            int umbral_hist;
-
-            std::cout << "\n--- FASE 04: Histograma de Aeropuertos ---" << std::endl;
-
-            //Pedimos el tipo
-            std::cout << "Seleccione tipo de aeropuerto (0: ORIGEN, 1: DESTINO): ";
-            while (!(std::cin >> tipo_sel) || (tipo_sel != 0 && tipo_sel != 1)) {
-                std::cout << "Error: Seleccione 0 o 1: ";
-                std::cin.clear();
-                std::cin.ignore(1000, '\n');
-            }
-
-            //Pedimos el umbral
-            std::cout << "Introduce el umbral minimo de ocurrencias para mostrar: ";
-            while (!(std::cin >> umbral_hist) || umbral_hist < 0) {
-                std::cout << "Error: Introduzca un numero positivo: ";
-                std::cin.clear();
-                std::cin.ignore(1000, '\n');
-            }
-
-            //Llamamos a la función cargadora pasando el vector correspondiente
-            if (tipo_sel == 0) {
-                std::cout << "Generando histograma de salidas (ORIGIN)..." << std::endl;
-                cargarFase04(h_origin_id, umbral_hist, mapa_aeropuertos);
+            if (!datos_listos)
+            { 
+                std::cout << "[!] Error: No hay datos cargados. Comprueba la ruta en la opcion (0)." << std::endl;
             }
             else {
-                std::cout << "Generando histograma de llegadas (DEST)..." << std::endl;
-                cargarFase04(h_dest_id, umbral_hist, mapa_aeropuertos);
+                // Retraso en despegues 
+                int umbral;
+                std::string entrada;
+
+                // Limpiamos el buffer del '1' que elegimos en el menú para que no interfiera
+                std::cin.ignore(1000, '\n');
+
+                // Bucle para asegurar que el usuario introduce un valor correcto y no deje el campo vacio
+                while (true) {
+                    std::cout << "Introduce el umbral de retraso (minutos): ";
+
+                    // Leemos la linea completa para evitar errores si el usuario mete letras o espacios
+                    if (!std::getline(std::cin, entrada)) continue;
+
+                    // Si solo pulsa Enter sin escribir nada, volvemos a preguntar
+                    if (entrada.empty()) continue;
+
+                    try {
+                        // Intentamos convertir el texto a numero entero
+                        umbral = std::stoi(entrada);
+                        break; // Si la conversion tiene exito, salimos del bucle de validacion
+                    }
+                    catch (...) {
+                        // Si salta un error (letras, simbolos...), avisamos al usuario
+                        std::cout << "Error: Debes introducir un numero entero valido." << std::endl;
+                    }
+                }
+
+                std::cout << "Ejecutando Fase 01 con umbral: " << umbral << "..." << std::endl;
+                //Llamada a la función con el umbral determinado
+                //Llamamos a cargarFase porque es la que llama a fase01 , prepara los espacios de memoria y copia los vectores
+                cargarFase01(h_dep_delay, umbral);
+
+                break;
             }
-            break;
+        }
+        case '2': {
+            if (!datos_listos)
+            {
+                std::cout << "[!] Error: No hay datos cargados. Comprueba la ruta en la opcion (0)." << std::endl;
+            }
+            else {
+                // Retraso en aterrizajes 
+                //Variables para el umbral
+                int umbral_llegada;
+                std::string entrada_f2;
+
+                //Limpiamos el buffer por si acaso
+                std::cin.ignore(1000, '\n');
+
+                //Bucle de validación (Igual que en Fase 1)
+                while (true) {
+                    std::cout << "\n--- FASE 02: Analisis de Llegadas ---" << std::endl;
+                    std::cout << "Introduce el umbral (positivo para retraso, negativo para adelanto): ";
+
+                    if (!std::getline(std::cin, entrada_f2)) continue;
+                    if (entrada_f2.empty()) continue;
+
+                    try {
+                        umbral_llegada = std::stoi(entrada_f2);
+                        break; // Si es un número válido, salimos del bucle
+                    }
+                    catch (...) {
+                        std::cout << "Error: Por favor, introduce un numero entero (ej: 1440 o -30)." << std::endl;
+                    }
+                }
+                std::cout << "Ejecutando Fase 02 con umbral " << umbral_llegada << "..." << std::endl;
+
+                //Llamada a la función cargarFase02 (igual que con la fase1)
+                cargarFase02(h_tail_num, h_arr_delay, umbral_llegada);
+                break;
+            }
+        }
+        case '3': {
+            if (!datos_listos)
+            {
+                std::cout << "[!] Error: No hay datos cargados. Comprueba la ruta en la opcion (0)." << std::endl;
+            }
+            else {
+                //Máximos/Mínimos 
+                int col_sel, op_sel, var_sel;
+
+                std::cout << "\n--- FASE 03: Reduccion de Retraso ---" << std::endl;
+
+                //Selección de Columna
+                std::cout << "Seleccione columna (" << COL_DEP << ":DEP, " << COL_ARR << ":ARR, " << COL_WEATHER << ":WEA): ";
+                if (!(std::cin >> col_sel) || col_sel < 0 || col_sel > 2) {
+                    std::cout << "Error: Seleccion de columna no valida." << std::endl;
+                    std::cin.clear(); std::cin.ignore(1000, '\n');
+                    break;
+                }
+
+                //Selección de Operación
+                std::cout << "Seleccione operacion (" << OP_MAX << ":Max, " << OP_MIN << ":Min): ";
+                if (!(std::cin >> op_sel) || (op_sel != OP_MAX && op_sel != OP_MIN)) {
+                    std::cout << "Error: Operacion no valida." << std::endl;
+                    std::cin.clear(); std::cin.ignore(1000, '\n');
+                    break;
+                }
+
+                //Selección de Variante
+                std::cout << "Seleccione variante (1:Simple, 2:Basica, 3:Intermedia, 4:Patron): ";
+                if (!(std::cin >> var_sel) || var_sel < 1 || var_sel > 4) {
+                    std::cout << "Error: Variante no valida." << std::endl;
+                    std::cin.clear(); std::cin.ignore(1000, '\n');
+                    break;
+                }
+
+                //Pasamos el vector correcto según la elección
+                if (col_sel == COL_DEP) {
+                    cargarFase03(h_dep_delay, op_sel, var_sel);
+                }
+                else if (col_sel == COL_ARR) {
+                    cargarFase03(h_arr_delay, op_sel, var_sel);
+                }
+                else if (col_sel == COL_WEATHER) {
+                    cargarFase03(h_weather_delay, op_sel, var_sel);
+                }
+
+                break;
+            }
+        }
+        case '4': {
+            if (!datos_listos)
+            {
+                std::cout << "[!] Error: No hay datos cargados. Comprueba la ruta en la opcion (0)." << std::endl;
+            }
+            else {
+                // Histograma 
+                int tipo_sel; // 0 para Origen, 1 para Destino
+                int umbral_hist;
+
+                std::cout << "\n--- FASE 04: Histograma de Aeropuertos ---" << std::endl;
+
+                //Pedimos el tipo
+                std::cout << "Seleccione tipo de aeropuerto (0: ORIGEN, 1: DESTINO): ";
+                while (!(std::cin >> tipo_sel) || (tipo_sel != 0 && tipo_sel != 1)) {
+                    std::cout << "Error: Seleccione 0 o 1: ";
+                    std::cin.clear();
+                    std::cin.ignore(1000, '\n');
+                }
+
+                //Pedimos el umbral
+                std::cout << "Introduce el umbral minimo de ocurrencias para mostrar: ";
+                while (!(std::cin >> umbral_hist) || umbral_hist < 0) {
+                    std::cout << "Error: Introduzca un numero positivo: ";
+                    std::cin.clear();
+                    std::cin.ignore(1000, '\n');
+                }
+
+                //Llamamos a la función cargadora pasando el vector correspondiente
+                if (tipo_sel == 0) {
+                    std::cout << "Generando histograma de salidas (ORIGIN)..." << std::endl;
+                    cargarFase04(h_origin_id, umbral_hist, mapa_aeropuertos);
+                }
+                else {
+                    std::cout << "Generando histograma de llegadas (DEST)..." << std::endl;
+                    cargarFase04(h_dest_id, umbral_hist, mapa_aeropuertos);
+                }
+                break;
+            }
         }
         case 'x':
             std::cout << "Saliendo..." << std::endl;
@@ -578,7 +624,7 @@ void cargarFase01(std::vector<float>& retrasosSalida, int umbral) {
     float* d_retrasos;
     //Calculamos el numero de hilos y bloques
     int bloques, hilosPorBloque;
-    configurarGridEstandar(num_vuelos, bloques, hilosPorBloque)
+    configurarGridEstandar(num_vuelos, bloques, hilosPorBloque);
 
     std::cout << "[GPU] Procesando " << num_vuelos << " vuelos..." << std::endl;
 
@@ -635,12 +681,9 @@ void cargarFase02(std::vector<std::string>& h_tail_num, std::vector<float>& retr
     cudaMemcpy(d_arr_delay_ent,retrasosLlegada.data(), num_vuelos * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_tail_num_ent, h_tail_num_c.data(), num_vuelos * MAX_MATRICULA * sizeof(char), cudaMemcpyHostToDevice);
 
-    //Buscamos el número de hilos que permite el ordenador, para que el programa pueda ser escalable
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int hilosPorBloque = prop.maxThreadsPerBlock;
-    //Calculamos el número de bloques que necesitamos con el máximo de hilos para abordar el vector completo
-    int bloques = (num_vuelos + hilosPorBloque - 1) / hilosPorBloque;
+    //Calculamos el numero de hilos y bloques
+    int bloques, hilosPorBloque;
+    configurarGridEstandar(num_vuelos, bloques, hilosPorBloque);
 
     //Ponemos el contador de la GPU a cero (lo usaremos para que no haya condiciones de carrera)
     int cero = 0;
@@ -706,27 +749,25 @@ void cargarFase03(std::vector<float>& retrasos, int operacion_elegida, int varia
     int valor_inicial = (operacion_elegida == OP_MAX) ? -999999 : 999999;
     //Lo copiamos a la variable de la GPU
     cudaMemcpy(d_resultado, &valor_inicial, sizeof(int), cudaMemcpyHostToDevice);
-    //Volvemos a calcular hilos por bloquye etc. Igual que en las otras fases(Hacer funcion)
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int threadsPerBlock = prop.maxThreadsPerBlock;
-    int blocks = (num_vuelos + threadsPerBlock - 1) / threadsPerBlock;
+    //Calculamos el numero de hilos y bloques
+    int bloques, hilosPorBloque;
+    configurarGridEstandar(num_vuelos, bloques, hilosPorBloque);
     //Calculamos los bytes necesarios para la memoria compartida de los bloques (se usa en parte2,3,4)
-    int bytesCompartida = threadsPerBlock * sizeof(int);
+    int bytesCompartida = hilosPorBloque * sizeof(int);
     switch (variante_elegida) {
         case VAR_SIMPLE:
-            fase03_simple <<< blocks, threadsPerBlock >>> (d_datos, d_resultado, num_vuelos, operacion_elegida);
+            fase03_simple <<< bloques, hilosPorBloque >>> (d_datos, d_resultado, num_vuelos, operacion_elegida);
             break;
 
         case VAR_BASICA:
             //Ponemos de tercer parámetro la cantidad de memoria compartida que necesitamos en cada bloque en los <<< >>>
-            fase03_basica <<< blocks, threadsPerBlock, bytesCompartida >>> (d_datos, d_resultado, num_vuelos, operacion_elegida);
+            fase03_basica <<< bloques, hilosPorBloque, bytesCompartida >>> (d_datos, d_resultado, num_vuelos, operacion_elegida);
             
             break;
 
         case VAR_INTERMEDIA:
             //Seguimos trayendonos todos los datos a memoria compartida pero solo un hilo manda el max o min
-            fase03_intermedia <<< blocks, threadsPerBlock, bytesCompartida >>>(d_datos, d_resultado, num_vuelos, operacion_elegida);
+            fase03_intermedia <<< bloques, hilosPorBloque, bytesCompartida >>>(d_datos, d_resultado, num_vuelos, operacion_elegida);
             break;
 
         case VAR_PATRON: {
@@ -772,14 +813,12 @@ void cargarFase04(std::vector<int>& vectorElegido, int umbral_hist, std::unorder
     cudaMemset(d_histograma, 0, tam_histograma * sizeof(int));
     //Copiamos los datos del vecrtor elegido por el usario a la gpu
     cudaMemcpy(d_ids, vectorElegido.data(), num_vuelos * sizeof(int), cudaMemcpyHostToDevice);
-    //Calculamos de nuevo el tamaño de bloques y los hilos por bloque
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int threadsPerBlock = prop.maxThreadsPerBlock;
-    int blocks = (num_vuelos + threadsPerBlock - 1) / threadsPerBlock;
+    //Calculamos el numero de hilos y bloques
+    int bloques, hilosPorBloque;
+    configurarGridEstandar(num_vuelos, bloques, hilosPorBloque);
     //Ejecutamos la funcion de la fase4
     std::cout << "[GPU] Generando histograma con " << tam_histograma << " posibles aeropuertos..." << std::endl;
-    fase04 <<< blocks, threadsPerBlock >>> (d_ids, d_histograma, num_vuelos, tam_histograma);
+    fase04 <<< bloques, hilosPorBloque >>> (d_ids, d_histograma, num_vuelos, tam_histograma);
     //Esperamos a todos los hilos
     cudaDeviceSynchronize();
     //Copiamos los resultados
@@ -820,4 +859,28 @@ void configurarGridEstandar(int n, int& blocks, int& threads) {
     threads = prop.maxThreadsPerBlock; 
     //Calculamos el número de bloques que necesitamos con el máximo de hilos para abordar el vector completo
     blocks = (n + threads - 1) / threads;
+}
+
+void resetYCargar(std::string ruta,
+    std::vector<float>& v1, std::vector<float>& v2,
+    std::vector<std::string>& v3, std::vector<float>& v4,
+    std::vector<int>& v5, std::vector<int>& v6,
+    std::unordered_map<int, std::string>& mapa,
+    bool& estado) {
+
+    // Limpiamos cualquier rastro de una carga anterior
+    v1.clear(); v2.clear(); v3.clear(); v4.clear(); v5.clear(); v6.clear();
+    mapa.clear();
+
+    std::cout << "\n Cargando datos desde: " << ruta << "..." << std::endl;
+    cargarDataset(ruta, v1, v2, v3, v4, v5, v6, mapa);
+
+    if (v1.empty()) {
+        std::cout << "[ERROR] La carga fallo. Los vectores estan vacios." << std::endl;
+        estado = false;
+    }
+    else {
+        std::cout << "[OK] Dataset listo con " << v1.size() << " registros." << std::endl;
+        estado = true;
+    }
 }
